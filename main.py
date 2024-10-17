@@ -77,10 +77,11 @@ def fetch_feed_stories(cookies, feeds):
                 f"{len(raw_stories)} stories found for {feed['id']} - {feed['feed_title']}"
             )
 
-        for idx, raw_story in enumerate(raw_stories[:MAX_STORIES]):
+        for raw_story in raw_stories[:MAX_STORIES]:
             story_title = raw_story.get("story_title")
             story_content_html = raw_story.get("story_content")
             story_permalink = raw_story.get("story_permalink")
+            story_hash = raw_story.get("story_hash")
 
             # Clean the HTML content
             story_content_text = clean_html(story_content_html)
@@ -91,7 +92,7 @@ def fetch_feed_stories(cookies, feeds):
 
             stories.append(
                 {
-                    "idx": idx,
+                    "story_hash": story_hash,
                     "story_title": story_title,
                     "story_content_text": story_content_text,
                     "story_permalink": story_permalink,
@@ -100,6 +101,25 @@ def fetch_feed_stories(cookies, feeds):
 
         feed_dict[feed["feed_title"]] = stories
     return feed_dict
+
+
+# TODO: implement chunking for stories because NB API only
+# supports up to 5 story_hashes, but fine if MAX_STORIES = 5
+def mark_stories_as_read(cookies, feed_dict):
+    if not feed_dict:
+        return
+    story_hashes = [
+        [story["story_hash"] for story in feed] for feed in feed_dict.values()
+    ]
+    for stories in story_hashes:
+        response = requests.post(
+            "https://newsblur.com/reader/mark_story_hashes_as_read",
+            cookies=cookies,
+            data=[("story_hash", story_hash) for story_hash in stories],
+        )
+        logging.info(f"Marked stories {len(stories)} as read")
+        if response.status_code != 200:
+            logging.error(f"Failed to mark stories as read")
 
 
 def summarize_stories(feed_dict, model_id):
@@ -142,6 +162,7 @@ def main():
     NEWSBLUR_PASSWORD = os.getenv("NEWSBLUR_PASSWORD")
     MODEL_ID = os.getenv("MODEL_ID")
     WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
+    MARK_STORIES_AS_READ = os.getenv("MARK_STORIES_AS_READ", "false").lower() == "true"
 
     cookies = authenticate_newsblur(NEWSBLUR_USERNAME, NEWSBLUR_PASSWORD)
     if not cookies:
@@ -162,6 +183,9 @@ def main():
     logging.info(f"Summary:\n\n{summary}")
 
     send_to_slack(summary, WEBHOOK_URL)
+
+    if MARK_STORIES_AS_READ:
+        mark_stories_as_read(cookies, feed_stories)
 
 
 if __name__ == "__main__":
