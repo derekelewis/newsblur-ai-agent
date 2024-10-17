@@ -1,0 +1,39 @@
+name: deploy-to-cloud-run
+
+on:
+  workflow_run:
+    workflows: ["image-publish"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.head_ref == 'main' }}
+    runs-on: ubuntu-latest
+    environment: gcp-personal-lab
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WIP }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Cloud Run Job
+        run: |
+          gcloud run jobs deploy newsblur-ai-agent \
+            --image ${{ secrets.IMAGE_NAME }} \
+            --region ${{ secrets.GCP_REGION }} \
+            --set-secrets NEWSBLUR_USERNAME=${{ secrets.GCP_SECRET_NEWSBLUR_USERNAME }}
+            --set-secrets NEWSBLUR_PASSWORD=${{ secrets.GCP_SECRET_NEWSBLUR_PASSWORD }}
+            --set-secrets SLACK_WEBHOOK_URL=${{ secrets.GCP_SECRET_SLACK_WEBHOOK_URL }}
+            --set-secrets OPENAI_API_KEY=${{ secrets.GCP_SECRET_OPENAI_API_KEY }}
+            --set-env-vars MODEL_ID=${{ env.MODEL_ID }},MARK_STORIES_AS_READ=${{ env.MARK_STORIES_AS_READ }}
