@@ -17,7 +17,8 @@ MAX_CONTENT_LENGTH = 3000  # Max length of story content to summarize
 MAX_TOKENS = 2000
 TEMPERATURE = 0.5
 SYSTEM_PROMPT = """You are an assistant that summarizes news articles.
-Please ensure that every article is summarized accurately.
+Please ensure that every article is summarized accurately. Insert the provided
+permalink for each story into the placeholder below.
 The summary should be in the following format:
 1. *Feed title*
   1. *Story title* - story summary (1-3 sentences) <permalink|[Read more]>
@@ -117,17 +118,24 @@ def mark_stories_as_read(cookies, feed_dict):
             cookies=cookies,
             data=[("story_hash", story_hash) for story_hash in stories],
         )
-        logging.info(f"Marked stories {len(stories)} as read")
+        logging.info(f"Marked {len(stories)} stories as read")
         if response.status_code != 200:
             logging.error(f"Failed to mark stories as read")
 
 
 def summarize_stories(feed_dict, model_id):
+    content = "Please summarize the following articles.\n\n"
+    for feed_title, stories in feed_dict.items():
+        content += f"Feed: {feed_title}\n"
+        for story in stories:
+            content += f"Title: {story['story_title']}\n"
+            content += f"Content: {story['story_content_text']}\n"
+            content += f"Link: {story['story_permalink']}\n\n"
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": f"Please summarize the following articles\n\n{feed_dict}",
+            "content": content,
         },
     ]
     try:
