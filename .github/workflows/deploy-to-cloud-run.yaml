@@ -36,4 +36,4 @@ jobs:
             --set-secrets NEWSBLUR_PASSWORD=${{ secrets.GCP_SECRET_NEWSBLUR_PASSWORD }} \ 
             --set-secrets SLACK_WEBHOOK_URL=${{ secrets.GCP_SECRET_SLACK_WEBHOOK_URL }} \
             --set-secrets OPENAI_API_KEY=${{ secrets.GCP_SECRET_OPENAI_API_KEY }} \
-            --set-env-vars MODEL_ID=${{ env.MODEL_ID }},MARK_STORIES_AS_READ=${{ env.MARK_STORIES_AS_READ }}
+            --set-env-vars MODEL_ID=${{ vars.MODEL_ID }},MARK_STORIES_AS_READ=${{ vars.MARK_STORIES_AS_READ }}
