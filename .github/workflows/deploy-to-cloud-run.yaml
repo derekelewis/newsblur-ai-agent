@@ -32,4 +32,5 @@ jobs:
           gcloud run jobs deploy newsblur-ai-agent \
             --image ${{ secrets.IMAGE_NAME }} \
             --region ${{ secrets.GCP_REGION }} \
-            --set-secrets NEWSBLUR_USERNAME=${{ secrets.GCP_SECRET_NEWSBLUR_USERNAME }}
+            --set-secrets NEWSBLUR_USERNAME=${{ secrets.GCP_SECRET_NEWSBLUR_USERNAME }} \
+            --set-secrets NEWSBLUR_PASSWORD=${{ secrets.GCP_SECRET_NEWSBLUR_PASSWORD }}
