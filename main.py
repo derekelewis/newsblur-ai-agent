@@ -50,7 +50,7 @@ def fetch_feeds(cookies):
 
 def clean_html(html_content):
     soup = BeautifulSoup(html_content, "html.parser")
-    return soup.get_text()[:MAX_CONTENT_LENGTH]
+    return soup.get_text()
 
 
 def fetch_feed_stories(cookies, feeds):
@@ -86,6 +86,13 @@ def fetch_feed_stories(cookies, feeds):
 
             # Clean the HTML content
             story_content_text = clean_html(story_content_html)
+
+            # Fetch content directly if RSS is empty or short
+            if len(story_content_text) < 100:
+                logging.info(
+                    f"Story content for f{story_hash} may be empty from RSS feed. Fetching directly..."
+                )
+                story_content_text = fetch_webpage(story_permalink)
 
             # Truncate content if necessary
             if len(story_content_text) > MAX_CONTENT_LENGTH:
@@ -163,6 +170,15 @@ def send_to_slack(summary, webhook_url):
     )
     if response.status_code != 200:
         logging.error(f"Failed to send message to Slack: {response.status_code}")
+
+
+def fetch_webpage(url):
+    response = requests.get(url)
+    if response.status_code != 200:
+        logging.error(f"Failed to fetch content for {url}")
+        return None
+    page_text = clean_html(response.content)
+    return page_text
 
 
 def main():
