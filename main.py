@@ -127,7 +127,7 @@ def mark_stories_as_read(cookies, feed_dict):
         )
         logging.info(f"Marked {len(stories)} stories as read")
         if response.status_code != 200:
-            logging.error(f"Failed to mark stories as read")
+            logging.error(f"Failed to mark stories as read: {response.status_code}")
 
 
 def summarize_stories(feed_dict, model_id):
@@ -175,7 +175,7 @@ def send_to_slack(summary, webhook_url):
 def fetch_webpage(url):
     response = requests.get(url)
     if response.status_code != 200:
-        logging.error(f"Failed to fetch content for {url}")
+        logging.error(f"Failed to fetch content for {url}: {response.status_code}")
         return None
     page_text = clean_html(response.content)
     return page_text
