@@ -5,7 +5,6 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import os
 from typing import Optional
-import datetime
 
 # Setup
 logging.basicConfig(level=logging.INFO)
@@ -159,7 +158,6 @@ def summarize_stories(feed_dict: dict, model_id: str) -> str:
 
 
 def send_to_slack(summary: str, webhook_url: str) -> None:
-    date = datetime.datetime.now().strftime("%m/%d/%y %I:%M %p")
     slack_data = {
         "text": f"Here is the latest summarized news:\n\n{summary}",
         "unfurl_links": False,
