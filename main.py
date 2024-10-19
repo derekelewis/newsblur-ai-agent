@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import os
 from typing import Optional
+import datetime
 
 # Setup
 logging.basicConfig(level=logging.INFO)
@@ -28,7 +29,6 @@ The summary should be in the following format:
 2. *Feed title*
 etc.
 """
-
 
 def authenticate_newsblur(username: str, password: str) -> Optional[requests.Session]:
     session = requests.Session()
