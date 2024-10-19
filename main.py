@@ -4,7 +4,7 @@ from openai import OpenAI
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import os
-import datetime
+from typing import Optional
 
 # Setup
 logging.basicConfig(level=logging.INFO)
@@ -30,36 +30,37 @@ etc.
 """
 
 
-def authenticate_newsblur(username, password):
-    response = requests.post(
+def authenticate_newsblur(username: str, password: str) -> Optional[requests.Session]:
+    session = requests.Session()
+    response = session.post(
         "https://newsblur.com/api/login",
         data={"username": username, "password": password},
     )
     if response.status_code != 200:
         logging.error(f"Authentication failed: {response.status_code}")
-    return response.cookies
+        return None
+    return session
 
 
-def fetch_feeds(cookies):
-    response = requests.get("https://newsblur.com/reader/feeds", cookies=cookies)
+def fetch_feeds(session: requests.Session) -> Optional[dict]:
+    response = session.get("https://newsblur.com/reader/feeds")
     if response.status_code != 200:
         logging.error(f"Failed to fetch feeds: {response.status_code}")
         return None
     return response.json().get("feeds", {})
 
 
-def clean_html(html_content):
+def clean_html(html_content: str) -> str:
     soup = BeautifulSoup(html_content, "html.parser")
     return soup.get_text()
 
 
-def fetch_feed_stories(cookies, feeds):
+def fetch_feed_stories(session: requests.Session, feeds: dict) -> Optional[dict]:
     feed_dict = {}
     for feed_id, feed in feeds.items():
         stories = []
-        response = requests.get(
+        response = session.get(
             f"https://newsblur.com/reader/feed/{feed_id}",
-            cookies=cookies,
             params={"read_filter": "unread"},
         )
         if response.status_code != 200:
@@ -113,16 +114,15 @@ def fetch_feed_stories(cookies, feeds):
 
 # TODO: implement chunking for stories because NB API only
 # supports up to 5 story_hashes, but fine if MAX_STORIES = 5
-def mark_stories_as_read(cookies, feed_dict):
+def mark_stories_as_read(session: requests.Session, feed_dict: dict) -> None:
     if not feed_dict:
         return
     story_hashes = [
         [story["story_hash"] for story in feed] for feed in feed_dict.values()
     ]
     for stories in story_hashes:
-        response = requests.post(
+        response = session.post(
             "https://newsblur.com/reader/mark_story_hashes_as_read",
-            cookies=cookies,
             data=[("story_hash", story_hash) for story_hash in stories],
         )
         logging.info(f"Marked {len(stories)} stories as read")
@@ -130,7 +130,7 @@ def mark_stories_as_read(cookies, feed_dict):
             logging.error(f"Failed to mark stories as read: {response.status_code}")
 
 
-def summarize_stories(feed_dict, model_id):
+def summarize_stories(feed_dict: dict, model_id: str) -> str:
     content = "Please summarize the following articles.\n\n"
     for feed_title, stories in feed_dict.items():
         content += f"Feed: {feed_title}\n"
@@ -158,7 +158,7 @@ def summarize_stories(feed_dict, model_id):
         return ""
 
 
-def send_to_slack(summary, webhook_url):
+def send_to_slack(summary: str, webhook_url: str) -> None:
     date = datetime.datetime.now().strftime("%m/%d/%y %I:%M %p")
     slack_data = {
         "text": f"Here is the latest summarized news:\n\n{summary}",
@@ -188,17 +188,17 @@ def main():
     WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
     MARK_STORIES_AS_READ = os.getenv("MARK_STORIES_AS_READ", "false").lower() == "true"
 
-    cookies = authenticate_newsblur(NEWSBLUR_USERNAME, NEWSBLUR_PASSWORD)
-    if not cookies:
-        logging.info("No cookies")
+    session = authenticate_newsblur(NEWSBLUR_USERNAME, NEWSBLUR_PASSWORD)
+    if not session:
+        logging.info("No session")
         return
 
-    feeds = fetch_feeds(cookies)
+    feeds = fetch_feeds(session)
     if not feeds:
         logging.info("No feeds")
         return
 
-    feed_stories = fetch_feed_stories(cookies, feeds)
+    feed_stories = fetch_feed_stories(session, feeds)
     if not feed_stories:
         logging.info("No feed stories")
         return
@@ -209,7 +209,7 @@ def main():
     send_to_slack(summary, WEBHOOK_URL)
 
     if MARK_STORIES_AS_READ:
-        mark_stories_as_read(cookies, feed_stories)
+        mark_stories_as_read(session, feed_stories)
 
 
 if __name__ == "__main__":
