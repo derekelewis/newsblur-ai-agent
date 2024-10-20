@@ -1,10 +1,12 @@
-import requests
 import logging
-from openai import OpenAI
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 import os
 from typing import Optional
+
+import requests
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from openai import OpenAI
+
 from models import Feed, Story
 
 # Setup
