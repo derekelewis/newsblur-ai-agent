@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import os
 from typing import Optional
+from models import Feed, Story
 
 # Setup
 logging.basicConfig(level=logging.INFO)
@@ -41,12 +42,13 @@ def authenticate_newsblur(username: str, password: str) -> Optional[requests.Ses
     return session
 
 
-def fetch_feeds(session: requests.Session) -> Optional[dict]:
+def fetch_feeds(session: requests.Session) -> Optional[list[Feed]]:
     response = session.get("https://newsblur.com/reader/feeds")
     if response.status_code != 200:
         logging.error(f"Failed to fetch feeds: {response.status_code}")
         return None
-    return response.json().get("feeds", {})
+    feeds = [Feed(id=feed_id, title=feed_data['feed_title']) for feed_id, feed_data in response.json().get("feeds", {}).items()]
+    return feeds
 
 
 def clean_html(html_content: str) -> str:
@@ -54,70 +56,59 @@ def clean_html(html_content: str) -> str:
     return soup.get_text()
 
 
-def fetch_feed_stories(session: requests.Session, feeds: dict) -> Optional[dict]:
-    feed_dict = {}
-    for feed_id, feed in feeds.items():
-        stories = []
-        response = session.get(
-            f"https://newsblur.com/reader/feed/{feed_id}",
-            params={"read_filter": "unread"},
+def fetch_feed_stories(session: requests.Session, feed: Feed) -> Optional[list[Story]]:
+    stories = []
+    response = session.get(
+        f"https://newsblur.com/reader/feed/{feed.id}",
+        params={"read_filter": "unread"},
+    )
+    if response.status_code != 200:
+        logging.error(
+            f"Failed to fetch stories for feed id {feed.id}: {response.status_code}"
         )
-        if response.status_code != 200:
-            logging.error(
-                f"Failed to fetch stories for feed id {feed_id}: {response.status_code}"
-            )
-            return None
+        return None
 
-        raw_stories = response.json().get("stories", [])
+    raw_stories = response.json().get("stories", [])
 
-        if not raw_stories:
-            logging.info(f"No stories found for {feed['id']} - {feed['feed_title']}")
-            continue
-        else:
+    if not raw_stories:
+        logging.info(f"No stories found for {feed.id} - {feed.title}")
+        return []
+    else:
+        logging.info(
+            f"{len(raw_stories)} stories found for {feed.id} - {feed.title}"
+        )
+
+    for raw_story in raw_stories[:MAX_STORIES]:
+        story_title = raw_story.get("story_title")
+        story_content_html = raw_story.get("story_content")
+        story_permalink = raw_story.get("story_permalink")
+        story_hash = raw_story.get("story_hash")
+
+        # Clean the HTML content
+        story_content_text = clean_html(story_content_html)
+
+        # Fetch content directly if RSS is empty or short
+        if len(story_content_text) < 100:
             logging.info(
-                f"{len(raw_stories)} stories found for {feed['id']} - {feed['feed_title']}"
+                f"Story content for f{story_hash} may be empty from RSS feed. Fetching directly..."
             )
+            story_content_text = fetch_webpage(story_permalink)
 
-        for raw_story in raw_stories[:MAX_STORIES]:
-            story_title = raw_story.get("story_title")
-            story_content_html = raw_story.get("story_content")
-            story_permalink = raw_story.get("story_permalink")
-            story_hash = raw_story.get("story_hash")
+        # Truncate content if necessary
+        if len(story_content_text) > MAX_CONTENT_LENGTH:
+            story_content_text = story_content_text[:MAX_CONTENT_LENGTH]
 
-            # Clean the HTML content
-            story_content_text = clean_html(story_content_html)
-
-            # Fetch content directly if RSS is empty or short
-            if len(story_content_text) < 100:
-                logging.info(
-                    f"Story content for f{story_hash} may be empty from RSS feed. Fetching directly..."
-                )
-                story_content_text = fetch_webpage(story_permalink)
-
-            # Truncate content if necessary
-            if len(story_content_text) > MAX_CONTENT_LENGTH:
-                story_content_text = story_content_text[:MAX_CONTENT_LENGTH]
-
-            stories.append(
-                {
-                    "story_hash": story_hash,
-                    "story_title": story_title,
-                    "story_content_text": story_content_text,
-                    "story_permalink": story_permalink,
-                }
-            )
-
-        feed_dict[feed["feed_title"]] = stories
-    return feed_dict
+        stories.append(Story(story_hash, story_title, story_content_text, story_permalink))
+    return stories
 
 
 # TODO: implement chunking for stories because NB API only
 # supports up to 5 story_hashes, but fine if MAX_STORIES = 5
-def mark_stories_as_read(session: requests.Session, feed_dict: dict) -> None:
-    if not feed_dict:
-        return
+def mark_stories_as_read(session: requests.Session, feeds: list[Feed]) -> None:
+    if not feeds:
+        return None
     story_hashes = [
-        [story["story_hash"] for story in feed] for feed in feed_dict.values()
+        [story.hash for story in feed.stories] for feed in feeds
     ]
     for stories in story_hashes:
         response = session.post(
@@ -129,14 +120,14 @@ def mark_stories_as_read(session: requests.Session, feed_dict: dict) -> None:
             logging.error(f"Failed to mark stories as read: {response.status_code}")
 
 
-def summarize_stories(feed_dict: dict, model_id: str) -> str:
+def summarize_stories(feeds: list[Feed], model_id: str) -> str:
     content = "Please summarize the following articles.\n\n"
-    for feed_title, stories in feed_dict.items():
-        content += f"Feed: {feed_title}\n"
-        for story in stories:
-            content += f"Title: {story['story_title']}\n"
-            content += f"Content: {story['story_content_text']}\n"
-            content += f"Link: {story['story_permalink']}\n\n"
+    for feed in feeds:
+        content += f"Feed: {feed.title}\n"
+        for story in feed.stories:
+            content += f"Title: {story.title}\n"
+            content += f"Content: {story.content_text}\n"
+            content += f"Link: {story.permalink}\n\n"
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -196,18 +187,21 @@ def main():
         logging.info("No feeds")
         return
 
-    feed_stories = fetch_feed_stories(session, feeds)
-    if not feed_stories:
+    for feed in feeds:
+        feed.stories = fetch_feed_stories(session, feed)
+
+    feeds_with_stories = [feed for feed in feeds if feed.stories]
+    if not feeds_with_stories:
         logging.info("No feed stories")
         return
 
-    summary = summarize_stories(feed_stories, MODEL_ID)
+    summary = summarize_stories(feeds_with_stories, MODEL_ID)
     logging.info(f"Summary:\n\n{summary}")
 
     send_to_slack(summary, WEBHOOK_URL)
 
     if MARK_STORIES_AS_READ:
-        mark_stories_as_read(session, feed_stories)
+        mark_stories_as_read(session, feeds_with_stories)
 
 
 if __name__ == "__main__":
