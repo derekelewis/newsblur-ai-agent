@@ -32,6 +32,7 @@ The summary should be in the following format:
 etc.
 """
 
+
 def authenticate_newsblur(username: str, password: str) -> Optional[requests.Session]:
     session = requests.Session()
     response = session.post(
@@ -49,7 +50,10 @@ def fetch_feeds(session: requests.Session) -> Optional[list[Feed]]:
     if response.status_code != 200:
         logging.error(f"Failed to fetch feeds: {response.status_code}")
         return None
-    feeds = [Feed(id=feed_id, title=feed_data['feed_title']) for feed_id, feed_data in response.json().get("feeds", {}).items()]
+    feeds = [
+        Feed(id=feed_id, title=feed_data["feed_title"])
+        for feed_id, feed_data in response.json().get("feeds", {}).items()
+    ]
     return feeds
 
 
@@ -76,9 +80,7 @@ def fetch_feed_stories(session: requests.Session, feed: Feed) -> Optional[list[S
         logging.info(f"No stories found for {feed.id} - {feed.title}")
         return []
     else:
-        logging.info(
-            f"{len(raw_stories)} stories found for {feed.id} - {feed.title}"
-        )
+        logging.info(f"{len(raw_stories)} stories found for {feed.id} - {feed.title}")
 
     for raw_story in raw_stories[:MAX_STORIES]:
         story_title = raw_story.get("story_title")
@@ -100,7 +102,9 @@ def fetch_feed_stories(session: requests.Session, feed: Feed) -> Optional[list[S
         if len(story_content_text) > MAX_CONTENT_LENGTH:
             story_content_text = story_content_text[:MAX_CONTENT_LENGTH]
 
-        stories.append(Story(story_hash, story_title, story_content_text, story_permalink))
+        stories.append(
+            Story(story_hash, story_title, story_content_text, story_permalink)
+        )
     return stories
 
 
@@ -109,9 +113,7 @@ def fetch_feed_stories(session: requests.Session, feed: Feed) -> Optional[list[S
 def mark_stories_as_read(session: requests.Session, feeds: list[Feed]) -> None:
     if not feeds:
         return None
-    story_hashes = [
-        [story.hash for story in feed.stories] for feed in feeds
-    ]
+    story_hashes = [[story.hash for story in feed.stories] for feed in feeds]
     for stories in story_hashes:
         response = session.post(
             "https://newsblur.com/reader/mark_story_hashes_as_read",
