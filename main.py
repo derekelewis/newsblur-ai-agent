@@ -80,7 +80,8 @@ def fetch_feed_stories(session: requests.Session, feed: Feed) -> Optional[list[S
         logging.info(f"No stories found for {feed.id} - {feed.title}")
         return []
     else:
-        logging.info(f"{len(raw_stories)} stories found for {feed.id} - {feed.title}")
+        logging.info(
+            f"{len(raw_stories)} stories found for {feed.id} - {feed.title}")
 
     for raw_story in raw_stories[:MAX_STORIES]:
         story_title = raw_story.get("story_title")
@@ -121,10 +122,11 @@ def mark_stories_as_read(session: requests.Session, feeds: list[Feed]) -> None:
         )
         logging.info(f"Marked {len(stories)} stories as read")
         if response.status_code != 200:
-            logging.error(f"Failed to mark stories as read: {response.status_code}")
+            logging.error(
+                f"Failed to mark stories as read: {response.status_code}")
 
 
-def summarize_stories(feeds: list[Feed], model_id: str) -> str:
+def summarize_stories(feeds: list[Feed], model_id: str) -> str | None:
     content = "Please summarize the following articles.\n\n"
     for feed in feeds:
         content += f"Feed: {feed.title}\n"
@@ -139,17 +141,13 @@ def summarize_stories(feeds: list[Feed], model_id: str) -> str:
             "content": content,
         },
     ]
-    try:
-        response = openai.chat.completions.create(
-            model=model_id,
-            messages=messages,
-            max_tokens=MAX_TOKENS,
-            temperature=TEMPERATURE,
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        logging.error(f"OpenAI API error: {e}")
-        return ""
+    response = openai.chat.completions.create(
+        model=model_id,
+        messages=messages,
+        max_tokens=MAX_TOKENS,
+        temperature=TEMPERATURE,
+    )
+    return response.choices[0].message.content
 
 
 def send_to_slack(summary: str, webhook_url: str) -> None:
@@ -159,16 +157,19 @@ def send_to_slack(summary: str, webhook_url: str) -> None:
         "unfurl_media": False,
     }
     response = requests.post(
-        webhook_url, json=slack_data, headers={"Content-Type": "application/json"}
+        webhook_url, json=slack_data, headers={
+            "Content-Type": "application/json"}
     )
     if response.status_code != 200:
-        logging.error(f"Failed to send message to Slack: {response.status_code}")
+        logging.error(
+            f"Failed to send message to Slack: {response.status_code}")
 
 
 def fetch_webpage(url):
     response = requests.get(url)
     if response.status_code != 200:
-        logging.error(f"Failed to fetch content for {url}: {response.status_code}")
+        logging.error(
+            f"Failed to fetch content for {url}: {response.status_code}")
         return None
     page_text = clean_html(response.content)
     return page_text
@@ -179,7 +180,8 @@ def main():
     NEWSBLUR_PASSWORD = os.getenv("NEWSBLUR_PASSWORD")
     MODEL_ID = os.getenv("MODEL_ID")
     WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
-    MARK_STORIES_AS_READ = os.getenv("MARK_STORIES_AS_READ", "false").lower() == "true"
+    MARK_STORIES_AS_READ = os.getenv(
+        "MARK_STORIES_AS_READ", "false").lower() == "true"
 
     session = authenticate_newsblur(NEWSBLUR_USERNAME, NEWSBLUR_PASSWORD)
     if not session:
@@ -199,7 +201,12 @@ def main():
         logging.info("No feed stories")
         return
 
-    summary = summarize_stories(feeds_with_stories, MODEL_ID)
+    try:
+        summary = summarize_stories(feeds_with_stories, MODEL_ID)
+    except Exception as e:
+        logging.error(f"Failed to summarize stories: {e}")
+        return
+
     logging.info(f"Summary:\n\n{summary}")
 
     send_to_slack(summary, WEBHOOK_URL)
