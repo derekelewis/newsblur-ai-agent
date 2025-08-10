@@ -144,7 +144,7 @@ def summarize_stories(feeds: list[Feed], model_id: str) -> str | None:
     response = openai.chat.completions.create(
         model=model_id,
         messages=messages,
-        max_tokens=MAX_TOKENS,
+        max_completion_tokens=MAX_TOKENS,
         temperature=TEMPERATURE,
     )
     return response.choices[0].message.content
