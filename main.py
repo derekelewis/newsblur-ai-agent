@@ -18,7 +18,7 @@ openai = OpenAI()
 MAX_STORIES = 5  # Number of stories to process
 MAX_CONTENT_LENGTH = 3000  # Max length of story content to summarize
 MAX_TOKENS = 2000
-TEMPERATURE = 0.5
+TEMPERATURE = 1.0
 SYSTEM_PROMPT = """You are an assistant that summarizes news articles.
 Please ensure that every article is summarized accurately. Insert the provided
 permalink for each story into the placeholder below.
