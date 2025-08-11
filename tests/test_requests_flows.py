@@ -16,7 +16,7 @@ def test_authenticate_newsblur_success_and_failure(monkeypatch):
     calls = {"post": []}
 
     class Sess:
-        def post(self, url, data=None):
+        def post(self, url, data=None, **kwargs):
             calls["post"].append((url, data))
             if data.get("password") == "ok":
                 return Resp(200)
@@ -36,7 +36,7 @@ def test_fetch_feeds_parses_and_handles_error(monkeypatch):
         def __init__(self, resp):
             self._resp = resp
 
-        def get(self, url):
+        def get(self, url, **kwargs):
             return self._resp
 
     data = {"feeds": {"1": {"feed_title": "Tech"}, "2": {"feed_title": "News"}}}
@@ -70,7 +70,7 @@ def test_fetch_feed_stories_with_fallback_and_truncate(monkeypatch):
     }
 
     class Sess:
-        def get(self, url, params=None):
+        def get(self, url, params=None, **kwargs):
             return Resp(200, raw)
 
     # Force fetch_webpage to return a fallback body
@@ -91,7 +91,7 @@ def test_fetch_feed_stories_none_and_empty(monkeypatch):
             self._status = status
             self._body = body
 
-        def get(self, url, params=None):
+        def get(self, url, params=None, **kwargs):
             return Resp(self._status, self._body)
 
     none = main.fetch_feed_stories(Sess(500, {}), feed)
@@ -105,7 +105,7 @@ def test_mark_stories_as_read_posts_hashes(monkeypatch):
     posted = []
 
     class Sess:
-        def post(self, url, data=None):
+        def post(self, url, data=None, **kwargs):
             posted.append((url, list(data)))
             return Resp(200)
 
@@ -121,7 +121,7 @@ def test_mark_stories_as_read_posts_hashes(monkeypatch):
 def test_send_to_slack_success_and_error(monkeypatch):
     calls = []
 
-    def fake_post(url, json=None, headers=None):
+    def fake_post(url, json=None, headers=None, **kwargs):
         calls.append((url, json))
         # First call success, second fails
         return Resp(200 if len(calls) == 1 else 500)
@@ -136,10 +136,10 @@ def test_send_to_slack_success_and_error(monkeypatch):
 
 
 def test_fetch_webpage_success_and_failure(monkeypatch):
-    def get_ok(url):
+    def get_ok(url, **kwargs):
         return Resp(200, json_data=None, content=b"<p>ok</p>")
 
-    def get_fail(url):
+    def get_fail(url, **kwargs):
         return Resp(404)
 
     monkeypatch.setattr(main.requests, "get", get_ok)
@@ -147,4 +147,3 @@ def test_fetch_webpage_success_and_failure(monkeypatch):
 
     monkeypatch.setattr(main.requests, "get", get_fail)
     assert main.fetch_webpage("http://x") is None
-
