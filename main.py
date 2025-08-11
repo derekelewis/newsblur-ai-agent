@@ -32,13 +32,22 @@ The summary should be in the following format:
 etc.
 """
 
+# Networking
+# Use short connect timeout and reasonable read timeout to avoid hangs
+DEFAULT_TIMEOUT = (5, 15)
+
 
 def authenticate_newsblur(username: str, password: str) -> Optional[requests.Session]:
     session = requests.Session()
-    response = session.post(
-        "https://newsblur.com/api/login",
-        data={"username": username, "password": password},
-    )
+    try:
+        response = session.post(
+            "https://newsblur.com/api/login",
+            data={"username": username, "password": password},
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Authentication request failed: {e}")
+        return None
     if response.status_code != 200:
         logging.error(f"Authentication failed: {response.status_code}")
         return None
@@ -46,35 +55,67 @@ def authenticate_newsblur(username: str, password: str) -> Optional[requests.Ses
 
 
 def fetch_feeds(session: requests.Session) -> Optional[list[Feed]]:
-    response = session.get("https://newsblur.com/reader/feeds")
+    try:
+        response = session.get("https://newsblur.com/reader/feeds", timeout=DEFAULT_TIMEOUT)
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch feeds: {e}")
+        return None
     if response.status_code != 200:
         logging.error(f"Failed to fetch feeds: {response.status_code}")
         return None
+    try:
+        data = response.json()
+    except ValueError:
+        logging.error("Failed to parse feeds response JSON")
+        return None
     feeds = [
-        Feed(id=feed_id, title=feed_data["feed_title"])
-        for feed_id, feed_data in response.json().get("feeds", {}).items()
+        Feed(id=feed_id, title=feed_data.get("feed_title", ""))
+        for feed_id, feed_data in data.get("feeds", {}).items()
     ]
     return feeds
 
 
-def clean_html(html_content: str) -> str:
-    soup = BeautifulSoup(html_content, "html.parser")
-    return soup.get_text()
+def clean_html(html_content: str | bytes | None) -> str:
+    if html_content is None:
+        return ""
+    try:
+        text = (
+            html_content.decode("utf-8", errors="ignore")
+            if isinstance(html_content, (bytes, bytearray))
+            else str(html_content)
+        )
+        soup = BeautifulSoup(text, "html.parser")
+        return soup.get_text()
+    except Exception as e:
+        logging.error(f"Failed to clean HTML: {e}")
+        return ""
 
 
 def fetch_feed_stories(session: requests.Session, feed: Feed) -> Optional[list[Story]]:
     stories = []
-    response = session.get(
-        f"https://newsblur.com/reader/feed/{feed.id}",
-        params={"read_filter": "unread"},
-    )
+    try:
+        response = session.get(
+            f"https://newsblur.com/reader/feed/{feed.id}",
+            params={"read_filter": "unread"},
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except requests.exceptions.RequestException as e:
+        logging.error(
+            f"Failed to fetch stories for feed id {feed.id}: {e}"
+        )
+        return None
     if response.status_code != 200:
         logging.error(
             f"Failed to fetch stories for feed id {feed.id}: {response.status_code}"
         )
         return None
 
-    raw_stories = response.json().get("stories", [])
+    try:
+        raw = response.json()
+    except ValueError:
+        logging.error(f"Invalid JSON when fetching stories for feed id {feed.id}")
+        return None
+    raw_stories = raw.get("stories", [])
 
     if not raw_stories:
         logging.info(f"No stories found for {feed.id} - {feed.title}")
@@ -93,11 +134,13 @@ def fetch_feed_stories(session: requests.Session, feed: Feed) -> Optional[list[S
         story_content_text = clean_html(story_content_html)
 
         # Fetch content directly if RSS is empty or short
-        if len(story_content_text) < 100:
+        if len(story_content_text) < 100 and story_permalink:
             logging.info(
-                f"Story content for f{story_hash} may be empty from RSS feed. Fetching directly..."
+                f"Story content for {story_hash} may be empty from RSS feed. Fetching directly..."
             )
-            story_content_text = fetch_webpage(story_permalink)
+            fetched = fetch_webpage(story_permalink)
+            if fetched:
+                story_content_text = fetched
 
         # Truncate content if necessary
         if len(story_content_text) > MAX_CONTENT_LENGTH:
@@ -116,14 +159,20 @@ def mark_stories_as_read(session: requests.Session, feeds: list[Feed]) -> None:
         return None
     story_hashes = [[story.hash for story in feed.stories] for feed in feeds]
     for stories in story_hashes:
-        response = session.post(
-            "https://newsblur.com/reader/mark_story_hashes_as_read",
-            data=[("story_hash", story_hash) for story_hash in stories],
-        )
-        logging.info(f"Marked {len(stories)} stories as read")
+        try:
+            response = session.post(
+                "https://newsblur.com/reader/mark_story_hashes_as_read",
+                data=[("story_hash", story_hash) for story_hash in stories],
+                timeout=DEFAULT_TIMEOUT,
+            )
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Failed to mark stories as read: {e}")
+            continue
         if response.status_code != 200:
             logging.error(
                 f"Failed to mark stories as read: {response.status_code}")
+        else:
+            logging.info(f"Marked {len(stories)} stories as read")
 
 
 def summarize_stories(feeds: list[Feed], model_id: str) -> str | None:
@@ -150,23 +199,40 @@ def summarize_stories(feeds: list[Feed], model_id: str) -> str | None:
     return response.choices[0].message.content
 
 
-def send_to_slack(summary: str, webhook_url: str) -> None:
+def send_to_slack(summary: str, webhook_url: str | None) -> None:
+    if not webhook_url:
+        logging.error("SLACK_WEBHOOK_URL is not set; skipping Slack notification")
+        return
     slack_data = {
         "text": f"Here is the latest summarized news:\n\n{summary}",
         "unfurl_links": False,
         "unfurl_media": False,
     }
-    response = requests.post(
-        webhook_url, json=slack_data, headers={
-            "Content-Type": "application/json"}
-    )
+    try:
+        response = requests.post(
+            webhook_url,
+            json=slack_data,
+            headers={"Content-Type": "application/json"},
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to send message to Slack: {e}")
+        return
     if response.status_code != 200:
+        # Avoid logging full response body; include brief tail for diagnostics
+        snippet = getattr(response, "text", "")
+        if snippet:
+            snippet = snippet[:200]
         logging.error(
-            f"Failed to send message to Slack: {response.status_code}")
+            f"Failed to send message to Slack: {response.status_code} {snippet}")
 
 
-def fetch_webpage(url):
-    response = requests.get(url)
+def fetch_webpage(url: str) -> Optional[str]:
+    try:
+        response = requests.get(url, timeout=DEFAULT_TIMEOUT)
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch content for {url}: {e}")
+        return None
     if response.status_code != 200:
         logging.error(
             f"Failed to fetch content for {url}: {response.status_code}")
@@ -182,6 +248,20 @@ def main():
     WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
     MARK_STORIES_AS_READ = os.getenv(
         "MARK_STORIES_AS_READ", "false").lower() == "true"
+
+    # Validate required configuration
+    missing = []
+    if not NEWSBLUR_USERNAME:
+        missing.append("NEWSBLUR_USERNAME")
+    if not NEWSBLUR_PASSWORD:
+        missing.append("NEWSBLUR_PASSWORD")
+    if not MODEL_ID:
+        missing.append("MODEL_ID")
+    if not WEBHOOK_URL:
+        missing.append("SLACK_WEBHOOK_URL")
+    if missing:
+        logging.error(f"Missing required environment variables: {', '.join(missing)}")
+        return
 
     session = authenticate_newsblur(NEWSBLUR_USERNAME, NEWSBLUR_PASSWORD)
     if not session:
@@ -207,7 +287,12 @@ def main():
         logging.error(f"Failed to summarize stories: {e}")
         return
 
-    logging.info(f"Summary:\n\n{summary}")
+    if not summary:
+        logging.error("Summarization returned no content; skipping Slack notification")
+        return
+
+    # Log only a snippet to avoid large logs
+    logging.info(f"Summary (first 500 chars):\n\n{summary[:500]}")
 
     send_to_slack(summary, WEBHOOK_URL)
 
